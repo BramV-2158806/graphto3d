@@ -211,7 +211,7 @@ class ContextAwareContentWrapper:
             gconv_pooling=model_args["pooling"],
             with_angles=model_args["with_angles"],
         )
-        self.model.load_networks(exp=exp_dir, epoch=epoch)
+        self.model.load_networks(exp=exp_dir, epoch=epoch, map_location=self.device)
         self.model = self.model.to(self.device).eval()
 
         merged_class_alias = dict(DEFAULT_CLASS_ALIAS_MAP)

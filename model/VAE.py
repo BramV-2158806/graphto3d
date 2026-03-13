@@ -102,35 +102,53 @@ class VAE(nn.Module):
         boxes, angles, shapes = self.decoder_boxes_and_shape(z_boxes, z_shapes, objs, triples, attributes, None)
         return mu_boxes, logvar_boxes, mu_shapes, logvar_shapes, boxes, angles, shapes
 
-    def load_networks(self, exp, epoch, strict=True):
+    def load_networks(self, exp, epoch, strict=True, map_location=None):
         if self.type_ == 'dis':
             self.vae_box.load_state_dict(
-                torch.load(os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch))),
+                torch.load(
+                    os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch)),
+                    map_location=map_location,
+                ),
                 strict=strict
             )
             self.vae_shape.load_state_dict(
-                torch.load(os.path.join(exp, 'checkpoint', 'model_shape_{}.pth'.format(epoch))),
+                torch.load(
+                    os.path.join(exp, 'checkpoint', 'model_shape_{}.pth'.format(epoch)),
+                    map_location=map_location,
+                ),
                 strict=strict
             )
         elif self.type_ == 'shared':
             print()
-            ckpt = torch.load(os.path.join(exp, 'checkpoint', 'model{}.pth'.format(epoch))).state_dict()
+            ckpt = torch.load(
+                os.path.join(exp, 'checkpoint', 'model{}.pth'.format(epoch)),
+                map_location=map_location,
+            ).state_dict()
             self.vae.load_state_dict(
                 ckpt,
                 strict=strict
             )
         elif self.type_ == 'mlp':
             self.vae_box.load_state_dict(
-                torch.load(os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch))),
+                torch.load(
+                    os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch)),
+                    map_location=map_location,
+                ),
                            strict=strict
             )
             self.vae_shape.load_state_dict(
-                torch.load(os.path.join(exp, 'checkpoint', 'model_shape_{}.pth'.format(epoch))),
+                torch.load(
+                    os.path.join(exp, 'checkpoint', 'model_shape_{}.pth'.format(epoch)),
+                    map_location=map_location,
+                ),
                            strict=strict
             )
         elif self.type_ == 'sln':
             self.vae_box.load_state_dict(
-                torch.load(os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch))),
+                torch.load(
+                    os.path.join(exp, 'checkpoint', 'model_box_{}.pth'.format(epoch)),
+                    map_location=map_location,
+                ),
                 strict=False
             )
 
