@@ -45,18 +45,63 @@ class Addition:
 # - Prefer broad stable fallback classes for synthetic UI objects (for example text panels -> picture/chair).
 # - You can override these defaults per API request via class_alias_map.
 DEFAULT_CLASS_ALIAS_MAP: Dict[str, str] = {
+    # Room structure / fixtures
+    "brickwall": "wall",
+    "brickwall (2)": "wall",
+    "brickwall (3)": "wall",
+    "brick wall (4)": "wall",
+    "concretefloor": "floor",
+    "garage port": "door",
+    "window (1)": "window",
+    "window (2)": "window",
     "storage cabinet": "cabinet",
-    "cabinet": "cabinet",
-    "frame": "table",
-    "saddle": "chair",
-    "fronttire": "chair",
-    "reartire": "chair",
-    "frontrim": "chair",
-    "rearrim": "chair",
-    "fronthub": "chair",
-    "rearhub": "chair",
-    "reardiskbrakerotor": "chair",
+    "boiler": "heater",
+
+    # Bicycle aggregate / unknown generated ids
+    "carbonframebike_0": "object",
+    "zb_vr_299": "object",
+
+    # Bicycle frame and cockpit
+    "frame": "frame",
+    "frontfork": "object",
+    "frontfork(2)": "object",
+    "stem": "object",
+    "handlebars": "object",
+    "leftgrip": "object",
+    "rightgrip": "object",
+    "seatpost": "pipe",
+    "saddle": "object",
+
+    # Wheels and tire system
+    "frontwheel": "object",
+    "rearwheel": "object",
+    "fronttire": "object",
+    "reartire": "object",
+    "frontrim": "object",
+    "rearrim": "object",
+    "frontspokes": "object",
+    "rearspokes": "object",
+    "fronthub": "object",
+    "rearhub": "object",
+    "frontright hubnut": "object",
+    "rearrighthubnut": "object",
+    "rearlefthubnut": "object",
+
+    # Drivetrain and brake details
+    "chain": "object",
+    "chainrings": "object",
+    "rightcrankandpedal": "object",
+    "leftcrankandpedal": "object",
+    "rearcasette": "object",
+    "rearderailleur": "object",
+    "rearrightchainstay": "pipe",
+    "rearleftchainstay": "pipe",
+    "frontdiskbrakerotor": "object",
+    "reardiskbrakerotor": "object",
+    "frontcalliper": "object",
+    "rearcalliper": "object",
 }
+
 
 # Default relation normalization map.
 #
@@ -76,13 +121,22 @@ DEFAULT_RELATION_ALIAS_MAP: Dict[str, str] = {
     "infrontof": "front",
     "front": "front",
     "behind": "behind",
+
     "leftof": "left",
     "left": "left",
     "rightof": "right",
     "right": "right",
+
     "nextto": "close by",
-    "ontop": "standing on",
+    "next to": "close by",
+
     "inside": "inside",
+
+    # Keep edges instead of dropping them; semantic direction is imperfect.
+    "contains": "close by",
+
+    "ontop": "standing on",
+    "on top": "standing on",
     "under": "lower than",
 }
 
