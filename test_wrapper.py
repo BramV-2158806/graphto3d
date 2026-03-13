@@ -55,13 +55,14 @@ def main():
     # --------------------------------------------------------------------------
     scene_graph_path = os.path.join(base_dir, "scene_graph.json")
     architect_path = os.path.join(base_dir, "architect_response_cache.json")
+    output_path = os.path.join(base_dir, "test_script_output.json")
 
     print(f"Loading scene graph: {scene_graph_path}")
-    with open(scene_graph_path, "r") as f:
+    with open(scene_graph_path, "r", encoding="utf-8-sig") as f:
         scene_graph = json.load(f)
 
     print(f"Loading architect response: {architect_path}")
-    with open(architect_path, "r") as f:
+    with open(architect_path, "r", encoding="utf-8-sig") as f:
         architect_response = json.load(f)
 
     # --------------------------------------------------------------------------
@@ -82,9 +83,14 @@ def main():
         )
 
         response = wrapper.predict_addition_boxes(model_inputs)
+        response_json = response.json(indent=2)
 
         print("\nPrediction Result:")
-        print(response.json(indent=2))
+        print(response_json)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(response_json)
+        print(f"Saved prediction output to: {output_path}")
     except Exception as e:
         print(f"\n[Error] Prediction failed: {e}")
 

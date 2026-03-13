@@ -6,8 +6,53 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import torch
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
+
+try:
+    from fastapi import FastAPI, HTTPException
+except Exception:
+    class HTTPException(Exception):
+        def __init__(self, status_code: int, detail: str):
+            super().__init__(detail)
+            self.status_code = status_code
+            self.detail = detail
+
+    class FastAPI:  # Minimal no-op fallback for non-API usage.
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def on_event(self, *args, **kwargs):
+            def decorator(fn):
+                return fn
+            return decorator
+
+        def get(self, *args, **kwargs):
+            def decorator(fn):
+                return fn
+            return decorator
+
+        def post(self, *args, **kwargs):
+            def decorator(fn):
+                return fn
+            return decorator
+
+try:
+    from pydantic import BaseModel, Field
+except Exception:
+    class BaseModel:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+        def dict(self):
+            return self.__dict__
+
+        def json(self, indent=None):
+            return json.dumps(self.__dict__, indent=indent)
+
+    def Field(default=None, default_factory=None, **kwargs):
+        if default_factory is not None:
+            return default_factory()
+        return default
 
 from helpers.util import batch_torch_denormalize_box_params, normalize_box_params
 from model.VAE import VAE
@@ -682,16 +727,37 @@ class ContextAwareContentWrapper:
         manipulated_nodes = model_inputs["manipulated_nodes"]
         dec_labels = model_inputs["dec_labels"]
 
-        z_box, _ = self.model.encode_box(enc_objs, enc_triples, enc_boxes6, enc_angles, attributes=None)
+        # The shared model does not implement VAE.encode_box; use its full encoder
+        # with zero shape features when point/shape embeddings are unavailable.
+        if getattr(self.model, "type_", None) == "shared":
+            shape_feats = torch.zeros((enc_objs.shape[0], 128), dtype=torch.float32, device=self.device)
+            z_box, _ = self.model.vae.encoder(
+                enc_objs,
+                enc_triples,
+                enc_boxes6,
+                shape_feats,
+                attributes=None,
+                angles_gt=enc_angles,
+            )
+            out, keep = self.model.vae.decoder_with_additions(
+                z_box,
+                dec_objs,
+                dec_triples,
+                attributes=None,
+                missing_nodes=missing_nodes,
+                manipulated_nodes=manipulated_nodes,
+            )
+        else:
+            z_box, _ = self.model.encode_box(enc_objs, enc_triples, enc_boxes6, enc_angles, attributes=None)
 
-        out, keep = self.model.decoder_with_changes_boxes(
-            z_box,
-            dec_objs,
-            dec_triples,
-            attributes=None,
-            missing_nodes=missing_nodes,
-            manipulated_nodes=manipulated_nodes,
-        )
+            out, keep = self.model.decoder_with_changes_boxes(
+                z_box,
+                dec_objs,
+                dec_triples,
+                attributes=None,
+                missing_nodes=missing_nodes,
+                manipulated_nodes=manipulated_nodes,
+            )
 
         if isinstance(out, tuple):
             boxes_pred_norm = out[0]
