@@ -1,0 +1,146 @@
+{
+  "reason": "Plan overview:\nI’ll turn the tire‑change article into concise, in‑scene guidance anchored to your actual bike parts so you can follow steps while standing at the bike. Tool checklist goes on the Storage Cabinet (where tools likely live). Removal instructions sit by each hub (front/rear). Deflation, bead removal, and bead‑seating checks are attached to the FrontTire/FrontRim with simple schematic images to show lever placement and correct bead seating. Re‑installation sits on the Frame near the dropouts. A short “when to replace” panel attaches to the RearTire (rear wears faster), plus final spin/rub checks near the RearDiskBrakeRotor. A small “carry spares” reminder lives by the Saddle.\n\nWhy this helps:\n- Each step appears exactly where you need it (hub, rim, tire, rotor, frame), reducing context‑switching and mistakes.\n- Images make the two trickiest concepts (lever use and even bead seating) immediately clear.\n- Rear‑specific wear cues help decide if today’s repair is due.\n- Spatial relations between panels on the same part keep content tidy and non‑overlapping.\n\nNow building the scene.",
+  "toolCalls": [
+    {
+      "id": "call_EOePDHNK9UYrDWZSCoXIj4eW",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "tools_checklist_cabinet",
+        "header": "Tire change — tools",
+        "content": "- Tire levers\n- New road bike tire (match your size)\n- Bike pump\n- Spare inner tube\nWith these, most roadside or at‑home tire changes are easy.",
+        "semantic_relation": "OnTop",
+        "target_object_name": "Storage Cabinet"
+      }
+    },
+    {
+      "id": "call_EtqFTpVyjvnNd0x32qD2HOVA",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step1_front_remove_wheel",
+        "header": "1) Remove the front wheel",
+        "content": "- If rim brakes: open the brake quick‑release (disc brakes: skip)\n- Open the quick‑release or thru‑axle at the hub\n- Lift the wheel clear of the fork",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontHub"
+      }
+    },
+    {
+      "id": "call_emAVtwATMBDXMdCnV7BIXn8m",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step1_rear_remove_wheel",
+        "header": "1) Remove the rear wheel",
+        "content": "- If rim brakes: open the brake quick‑release (disc brakes: skip)\n- Open the quick‑release or thru‑axle at the hub\n- Drop the wheel out of the frame",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "RearHub"
+      }
+    },
+    {
+      "id": "call_uf8sSIK4Ghd6p7Ll4kwRcB7T",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step2_deflate_front",
+        "header": "2) Deflate completely",
+        "content": "- Unscrew the Presta tip and press to release all air\n- A fully deflated tire comes off easier and avoids damage",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontTire"
+      }
+    },
+    {
+      "id": "call_MHg7H8PUp1a7rHsv9KF8nhNZ",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step3_remove_tire_front",
+        "header": "3) Unseat bead + remove tube",
+        "content": "- Insert a tire lever under the bead opposite the valve\n- Pry the bead over the rim, slide the lever around until one side is off\n- Remove the inner tube (if used)\n- Check inside tire and rim for glass/thorns",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontRim"
+      }
+    },
+    {
+      "id": "call_F8a3yDGLyCFJ8AY1yZq8OFV0",
+      "functionName": "CreateTextTo2D",
+      "arguments": {
+        "object_name": "img_pry_bead_front",
+        "image_description": "Minimalist schematic diagram showing a bicycle rim and tire close-up with a plastic tire lever hooked under the tire bead and prying it over the rim edge; clean flat colors, neutral background, no text or branding; emphasis on correct lever placement relative to bead and rim.",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontRim"
+      }
+    },
+    {
+      "id": "call_daHEMHw9UWOPAgAciUVctmHc",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step5_install_tire_front",
+        "header": "4) Install new tire/tube",
+        "content": "- Fit one bead onto the rim\n- Lightly inflate tube so it holds shape; place it evenly inside\n- Mount second bead starting at the valve and work around\n- Finish by hand to avoid pinching (use levers only if needed)",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontRim"
+      }
+    },
+    {
+      "id": "call_LrhGvljrdR1eP74IZvQsU8hL",
+      "functionName": "CreateTextTo2D",
+      "arguments": {
+        "object_name": "img_bead_seating_front",
+        "image_description": "Minimalist schematic of a bicycle wheel side view highlighting an evenly seated tire bead around the rim; include a small magnified circle showing the bead correctly inside the rim hook and another showing an incorrect bulge; flat infographic style, no text.",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontTire"
+      }
+    },
+    {
+      "id": "call_0AfIP5JrBJOFdiVkMuR4iRxP",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step6_inflate_check_front",
+        "header": "5) Inflate slowly + check seating",
+        "content": "- Add a small amount of air and inspect both sides: bead must sit evenly\n- Adjust if needed, then inflate to the pressure printed on the tire sidewall",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "FrontTire"
+      }
+    },
+    {
+      "id": "call_P9s0f52mpSf0o9oLbbAD1Bl8",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "step7_reinstall_wheel",
+        "header": "6) Reinstall and verify",
+        "content": "- Place the wheel fully in the dropouts and secure the quick‑release/thru‑axle\n- Reconnect rim brakes if used\n- Spin the wheel: it should run freely without rubbing",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "Frame"
+      }
+    },
+    {
+      "id": "call_YlRHf7QGJnOWyvieVK77bsLP",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "info_when_to_change_rear",
+        "header": "When to replace a road tire",
+        "content": "- Typical life: 2,000–4,000 km (rear wears faster)\n- Replace if tread is flat or wear indicators vanish\n- Cuts/cracks, frequent punctures, or poor wet grip = time to change\n- Early replacement keeps rides safer and predictable",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "RearTire"
+      }
+    },
+    {
+      "id": "call_9YZ2vbfhanfEivg4AZp8lofG",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "safety_after_install_rear",
+        "header": "Final checks before riding",
+        "content": "- Spin: no brake/rotor rubbing\n- Tire runs true with no hops; bead even all around\n- Pressure set to sidewall recommendation",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "RearDiskBrakeRotor"
+      }
+    },
+    {
+      "id": "call_atRjTOKjeeeuykblWdbBBEES",
+      "functionName": "CreateText",
+      "arguments": {
+        "object_name": "tip_spares_saddle",
+        "header": "Carry for next time",
+        "content": "- Spare inner tube\n- Tire levers\n- Compact pump\nThese make roadside fixes quick.",
+        "semantic_relation": "InFrontOf",
+        "target_object_name": "Saddle"
+      }
+    }
+  ]
+}
