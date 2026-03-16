@@ -726,6 +726,16 @@ class ContextAwareContentWrapper:
             "dec_labels": dec_labels,
             "skipped_additions": skipped_additions,
             "scene_centroid": scene_centroid,
+            # Raw lists retained so predict_addition_boxes can extend the encoder
+            # graph incrementally during autoregressive prediction.
+            "_raw_enc_objs": list(enc_objs),
+            "_raw_enc_labels": list(enc_labels),
+            "_raw_enc_boxes7": list(enc_boxes7),
+            "_raw_enc_triples": [list(t) for t in enc_triples],
+            "_raw_dec_labels": list(dec_labels),
+            "_raw_dec_objs": list(dec_objs),
+            "_raw_dec_triples": [list(t) for t in dec_triples],
+            "_scene_root_idx_enc": scene_root_idx_enc,
         }
         return inputs
 
@@ -747,83 +757,158 @@ class ContextAwareContentWrapper:
             - unity_size: x,y,z converted back for Unity scaling
             - unity_center: x,y,z converted back for Unity positioning
             - unity_yaw_deg: optional heading estimate when angle head is available
+
+        Notes:
+            - Predictions are made autoregressively: each addition is predicted one at a
+              time and its predicted box is fed back into the encoder graph so subsequent
+              additions see the already-placed panels as real scene context.
         """
-        enc_objs = model_inputs["enc_objs"]
-        enc_triples = model_inputs["enc_triples"]
-        enc_boxes6 = model_inputs["enc_boxes6"]
-        enc_angles = model_inputs["enc_angles"]
-
-        dec_objs = model_inputs["dec_objs"]
-        dec_triples = model_inputs["dec_triples"]
-        missing_nodes = model_inputs["missing_nodes"]
-        manipulated_nodes = model_inputs["manipulated_nodes"]
-        dec_labels = model_inputs["dec_labels"]
-
-        # The shared model does not implement VAE.encode_box; use its full encoder
-        # with zero shape features when point/shape embeddings are unavailable.
-        if getattr(self.model, "type_", None) == "shared":
-            shape_feats = torch.zeros((enc_objs.shape[0], 128), dtype=torch.float32, device=self.device)
-            z_box, _ = self.model.vae.encoder(
-                enc_objs,
-                enc_triples,
-                enc_boxes6,
-                shape_feats,
-                attributes=None,
-                angles_gt=enc_angles,
-            )
-            out, keep = self.model.vae.decoder_with_additions(
-                z_box,
-                dec_objs,
-                dec_triples,
-                attributes=None,
-                missing_nodes=missing_nodes,
-                manipulated_nodes=manipulated_nodes,
-            )
-        else:
-            z_box, _ = self.model.encode_box(enc_objs, enc_triples, enc_boxes6, enc_angles, attributes=None)
-
-            out, keep = self.model.decoder_with_changes_boxes(
-                z_box,
-                dec_objs,
-                dec_triples,
-                attributes=None,
-                missing_nodes=missing_nodes,
-                manipulated_nodes=manipulated_nodes,
-            )
-
-        if isinstance(out, tuple):
-            boxes_pred_norm = out[0]
-            angles_pred = out[1]
-        else:
-            boxes_pred_norm = out
-            angles_pred = None
-
-        boxes_pred_den = batch_torch_denormalize_box_params(boxes_pred_norm)
-
-        # Recover the scene centroid that was subtracted during build_model_inputs
-        # so that output positions are in the original world coordinate frame.
         scene_centroid: np.ndarray = model_inputs.get("scene_centroid", np.zeros(3, dtype=np.float32))
 
+        missing_nodes: List[int] = model_inputs["missing_nodes"]
+        manipulated_nodes: List[int] = model_inputs["manipulated_nodes"]
+        dec_labels: List[str] = model_inputs["dec_labels"]
+        dec_objs = model_inputs["dec_objs"]
+        dec_triples = model_inputs["dec_triples"]
+
+        # Working copies of the raw encoder lists that grow as panels are placed.
+        ar_enc_objs: List[int] = list(model_inputs["_raw_enc_objs"])
+        ar_enc_labels: List[str] = list(model_inputs["_raw_enc_labels"])
+        ar_enc_boxes7: List[np.ndarray] = [b.copy() for b in model_inputs["_raw_enc_boxes7"]]
+        ar_enc_triples: List[List[int]] = [list(t) for t in model_inputs["_raw_enc_triples"]]
+        scene_root_idx_enc: Optional[int] = model_inputs["_scene_root_idx_enc"]
+
+        # Map from decoder index -> encoder index for already-placed panels.
+        # Starts empty; filled as each panel is predicted.
+        dec_to_enc_idx: Dict[int, int] = {}
+
         predictions: List[Dict[str, Any]] = []
-        for i in range(boxes_pred_den.shape[0]):
-            if int(keep[i].item()) != 0:
+
+        for step, missing_dec_idx in enumerate(missing_nodes):
+            # ----------------------------------------------------------------
+            # 1. Build encoder tensors for this step (original scene + any
+            #    panels placed in previous steps).
+            # ----------------------------------------------------------------
+            ar_b6, ar_angles = self._normalize_boxes_for_model(ar_enc_boxes7, ar_enc_labels)
+            cur_enc_objs = torch.tensor(ar_enc_objs, dtype=torch.long, device=self.device)
+            cur_enc_triples = torch.tensor(ar_enc_triples, dtype=torch.long, device=self.device)
+            cur_enc_boxes6 = torch.tensor(ar_b6, dtype=torch.float32, device=self.device)
+            cur_enc_angles = torch.tensor(ar_angles, dtype=torch.long, device=self.device)
+
+            # ----------------------------------------------------------------
+            # 2. Encode the current scene.
+            # ----------------------------------------------------------------
+            is_shared = getattr(self.model, "type_", None) == "shared"
+            if is_shared:
+                shape_feats = torch.zeros(
+                    (cur_enc_objs.shape[0], 128), dtype=torch.float32, device=self.device
+                )
+                z_box, _ = self.model.vae.encoder(
+                    cur_enc_objs,
+                    cur_enc_triples,
+                    cur_enc_boxes6,
+                    shape_feats,
+                    attributes=None,
+                    angles_gt=cur_enc_angles,
+                )
+            else:
+                z_box, _ = self.model.encode_box(
+                    cur_enc_objs, cur_enc_triples, cur_enc_boxes6, cur_enc_angles, attributes=None
+                )
+
+            # ----------------------------------------------------------------
+            # 3. Build a z vector aligned with the decoder graph.
+            #    - Existing scene nodes: look up their encoder index in the
+            #      current (possibly extended) encoder graph.
+            #    - Already-placed panels: look up their enc index in dec_to_enc_idx.
+            #    - The current missing node: will be inserted as zero by
+            #      decoder_with_additions / decoder_with_changes_boxes.
+            # ----------------------------------------------------------------
+            # We need a z tensor of shape [N_dec_nodes_excluding_current_missing, dim]
+            # and then let the decoder insert the zero for missing_dec_idx.
+            # Build a mapping: dec_idx -> row in z_box.
+            # Original scene nodes (dec indices 0..N_orig_enc-1) map to their
+            # original enc indices (identity, since the first N_orig_enc rows of
+            # ar_enc are always the original nodes in the same order).
+            n_dec = dec_objs.shape[0]
+            n_enc_orig = len(model_inputs["_raw_enc_objs"])
+            z_dec = torch.zeros(
+                (n_dec, z_box.shape[1]), dtype=z_box.dtype, device=self.device
+            )
+            for dec_idx in range(n_dec):
+                if dec_idx == missing_dec_idx:
+                    # Will be handled by decoder_with_additions (zero insertion).
+                    continue
+                if dec_idx < n_enc_orig:
+                    # Original scene node — same position in encoder.
+                    z_dec[dec_idx] = z_box[dec_idx]
+                elif dec_idx in dec_to_enc_idx:
+                    # Previously placed panel — use its encoder row.
+                    z_dec[dec_idx] = z_box[dec_to_enc_idx[dec_idx]]
+                # else: future missing node — leave as zero (won't affect this step's
+                # prediction since the decoder GCN propagates from neighbours).
+
+            # ----------------------------------------------------------------
+            # 4. Decoder: predict box for this single addition.
+            # ----------------------------------------------------------------
+            if is_shared:
+                out, keep = self.model.vae.decoder_with_additions(
+                    z_dec,
+                    dec_objs,
+                    dec_triples,
+                    attributes=None,
+                    missing_nodes=[missing_dec_idx],
+                    manipulated_nodes=manipulated_nodes,
+                )
+            else:
+                out, keep = self.model.decoder_with_changes_boxes(
+                    z_dec,
+                    dec_objs,
+                    dec_triples,
+                    attributes=None,
+                    missing_nodes=[missing_dec_idx],
+                    manipulated_nodes=manipulated_nodes,
+                )
+
+            if isinstance(out, tuple):
+                boxes_pred_norm = out[0]
+                angles_pred = out[1]
+            else:
+                boxes_pred_norm = out
+                angles_pred = None
+
+            boxes_pred_den = batch_torch_denormalize_box_params(boxes_pred_norm)
+
+            # ----------------------------------------------------------------
+            # 5. Extract the predicted box for this addition.
+            #    decoder_with_additions inserts the new node at missing_dec_idx
+            #    so the output tensor has one extra row; keep[i]==0 marks it.
+            # ----------------------------------------------------------------
+            pred_row: Optional[int] = None
+            for i in range(boxes_pred_den.shape[0]):
+                if int(keep[i].item()) == 0:
+                    pred_row = i
+                    break
+
+            if pred_row is None:
+                # Shouldn't happen, but skip gracefully.
                 continue
 
-            b = boxes_pred_den[i].detach().cpu().numpy().tolist()
+            b = boxes_pred_den[pred_row].detach().cpu().numpy().tolist()
 
-            # Re-apply centroid offset to cx, cy, cz (indices 3, 4, 5).
+            # Re-apply scene centroid offset (world coordinates).
             b[3] += float(scene_centroid[0])
             b[4] += float(scene_centroid[1])
             b[5] += float(scene_centroid[2])
 
             yaw_deg = None
             if angles_pred is not None:
-                yaw_bin = int(torch.argmax(angles_pred[i]).item())
+                yaw_bin = int(torch.argmax(angles_pred[pred_row]).item())
                 yaw_deg = (yaw_bin / 24.0) * 360.0
 
             predictions.append(
                 {
-                    "name": dec_labels[i],
+                    "name": dec_labels[missing_dec_idx],
                     "box6_model_axes": {
                         "w": b[0],
                         "l": b[1],
@@ -832,13 +917,39 @@ class ContextAwareContentWrapper:
                         "cy": b[4],
                         "cz": b[5],
                     },
-                    # Converted back to Unity axis order
+                    # Converted back to Unity axis order.
                     "unity_size": {"x": b[0], "y": b[2], "z": b[1]},
                     "unity_center": {"x": b[3], "y": b[5], "z": b[4]},
                     "unity_yaw_deg": yaw_deg,
-                    "decoder_index": i,
+                    "decoder_index": missing_dec_idx,
                 }
             )
+
+            # ----------------------------------------------------------------
+            # 6. Feed the predicted box back into the encoder graph so the next
+            #    step sees this panel as real scene context.
+            #    Positions are stored centroid-relative (subtract centroid back).
+            # ----------------------------------------------------------------
+            placed_box7 = np.array(
+                [
+                    b[0], b[1], b[2],
+                    b[3] - float(scene_centroid[0]),
+                    b[4] - float(scene_centroid[1]),
+                    b[5] - float(scene_centroid[2]),
+                    0.0,  # yaw — panels are axis-aligned for encoding purposes
+                ],
+                dtype=np.float32,
+            )
+            new_enc_idx = len(ar_enc_objs)
+            ar_enc_objs.append(int(dec_objs[missing_dec_idx].item()))
+            ar_enc_labels.append(dec_labels[missing_dec_idx])
+            ar_enc_boxes7.append(placed_box7)
+            dec_to_enc_idx[missing_dec_idx] = new_enc_idx
+
+            # Add in-scene edge for the newly added encoder node.
+            if scene_root_idx_enc is not None:
+                in_scene_idx = self.vocab["pred_name_to_idx"].get("in scene", 0)
+                ar_enc_triples.append([new_enc_idx, in_scene_idx, scene_root_idx_enc])
 
         return PredictResponse(
             predictions=predictions,
