@@ -155,8 +155,8 @@ def batch_torch_denormalize_box_params(box_params, scale=3):
     :return: float tensor of shape [N, 6], the denormalized box parameters
     """
 
-    mean = torch.tensor([1.3827214, 1.309359, 0.9488993, -0.12464812, 0.6188591, -0.54847]).reshape(1,-1).float().to(box_params.device)
-    std = torch.tensor([1.7797655, 1.657638, 0.8501885, 1.9160025, 2.0038228, 0.70099753]).reshape(1,-1).float().to(box_params.device)
+    mean = torch.tensor([1.3827214, 1.309359, 0.9488993, -0.12464812, 0.6188591, -0.54847]).reshape(1,-1).float().cuda()
+    std = torch.tensor([1.7797655, 1.657638, 0.8501885, 1.9160025, 2.0038228, 0.70099753]).reshape(1,-1).float().cuda()
 
     return (box_params * std) / scale + mean
 
