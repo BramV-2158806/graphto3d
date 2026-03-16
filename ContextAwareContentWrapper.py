@@ -818,35 +818,33 @@ class ContextAwareContentWrapper:
 
             # ----------------------------------------------------------------
             # 3. Build a z vector aligned with the decoder graph.
-            #    - Existing scene nodes: look up their encoder index in the
-            #      current (possibly extended) encoder graph.
-            #    - Already-placed panels: look up their enc index in dec_to_enc_idx.
-            #    - The current missing node: will be inserted as zero by
-            #      decoder_with_additions / decoder_with_changes_boxes.
+            #
+            # decoder_with_additions expects z of shape [N_dec - 1, dim] — i.e.
+            # the latents for every decoder node EXCEPT the current missing one.
+            # It inserts a zero row at missing_dec_idx to produce [N_dec, dim].
+            # Passing [N_dec, dim] would cause it to grow to [N_dec+1, dim] and
+            # mismatch dec_objs.
+            #
+            # Row order: collect rows for dec indices 0..N_dec-1, skipping
+            # missing_dec_idx.  For each kept dec index:
+            #   - Original scene node (dec_idx < N_orig_enc): identity map to z_box.
+            #   - Already-placed panel (in dec_to_enc_idx): use its enc row.
+            #   - Future missing node: use zeros (won't be predicted this step).
             # ----------------------------------------------------------------
-            # We need a z tensor of shape [N_dec_nodes_excluding_current_missing, dim]
-            # and then let the decoder insert the zero for missing_dec_idx.
-            # Build a mapping: dec_idx -> row in z_box.
-            # Original scene nodes (dec indices 0..N_orig_enc-1) map to their
-            # original enc indices (identity, since the first N_orig_enc rows of
-            # ar_enc are always the original nodes in the same order).
             n_dec = dec_objs.shape[0]
             n_enc_orig = len(model_inputs["_raw_enc_objs"])
-            z_dec = torch.zeros(
-                (n_dec, z_box.shape[1]), dtype=z_box.dtype, device=self.device
-            )
+            z_rows = []
             for dec_idx in range(n_dec):
                 if dec_idx == missing_dec_idx:
-                    # Will be handled by decoder_with_additions (zero insertion).
-                    continue
+                    continue  # omitted; decoder inserts zero here
                 if dec_idx < n_enc_orig:
-                    # Original scene node — same position in encoder.
-                    z_dec[dec_idx] = z_box[dec_idx]
+                    z_rows.append(z_box[dec_idx])
                 elif dec_idx in dec_to_enc_idx:
-                    # Previously placed panel — use its encoder row.
-                    z_dec[dec_idx] = z_box[dec_to_enc_idx[dec_idx]]
-                # else: future missing node — leave as zero (won't affect this step's
-                # prediction since the decoder GCN propagates from neighbours).
+                    z_rows.append(z_box[dec_to_enc_idx[dec_idx]])
+                else:
+                    # Future missing node — placeholder zero.
+                    z_rows.append(torch.zeros(z_box.shape[1], dtype=z_box.dtype, device=self.device))
+            z_dec = torch.stack(z_rows, dim=0)  # [N_dec - 1, dim]
 
             # ----------------------------------------------------------------
             # 4. Decoder: predict box for this single addition.
@@ -881,8 +879,7 @@ class ContextAwareContentWrapper:
 
             # ----------------------------------------------------------------
             # 5. Extract the predicted box for this addition.
-            #    decoder_with_additions inserts the new node at missing_dec_idx
-            #    so the output tensor has one extra row; keep[i]==0 marks it.
+            #    Output has N_dec rows. keep[i]==0 marks the predicted node.
             # ----------------------------------------------------------------
             pred_row: Optional[int] = None
             for i in range(boxes_pred_den.shape[0]):
