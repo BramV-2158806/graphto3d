@@ -191,7 +191,7 @@ class PredictRequest(BaseModel):
     architect_response: Dict[str, Any]
     class_alias_map: Dict[str, str] = Field(default_factory=dict)
     relation_alias_map: Dict[str, str] = Field(default_factory=dict)
-    default_added_class: str = "picture"
+    default_added_class: str = "screen"
 
 
 class PredictResponse(BaseModel):
@@ -334,6 +334,13 @@ class ContextAwareContentWrapper:
             if not label or not center or not size:
                 continue
 
+            # Compute yaw from worldForward if available.
+            # Unity xyz -> model xzy axis swap: model-x = Unity-x, model-y = Unity-z.
+            # Yaw in model convention = atan2(forward_model_x, forward_model_y)
+            #                         = atan2(forward_unity_x, forward_unity_z).
+            wf = n.get("worldForward", {})
+            yaw_rad = math.atan2(float(wf.get("x", 0.0)), float(wf.get("z", 1.0))) if wf else 0.0
+
             # Model uses [w, l, h, cx, cy, cz]. We map Unity xyz -> xzy.
             node = NodeBox(
                 label=label,
@@ -353,7 +360,7 @@ class ContextAwareContentWrapper:
                     ],
                     dtype=np.float32,
                 ),
-                yaw_rad=0.0,
+                yaw_rad=yaw_rad,
             )
             nodes[label] = node
         return nodes
@@ -472,30 +479,33 @@ class ContextAwareContentWrapper:
             New 7D box guess near the target object.
 
         Notes:
+            - Size is fixed at a realistic text-panel footprint (30 cm wide x 2 cm deep x 40 cm tall
+              in model axes w/l/h) regardless of the target object's dimensions.  This avoids
+              seeding the decoder with tiny hub-nut-scale dimensions.
+            - The center is offset from the target center by a fixed gap in the requested direction.
             - This is a heuristic seed; the network predicts the final placement.
         """
-        box = target_box7.copy()
-        w, l, h = box[0], box[1], box[2]
-        cx, cy, cz = box[3], box[4], box[5]
+        # Fixed panel dimensions in model axes: w=0.3m, l=0.02m (depth), h=0.4m (height).
+        PANEL_W, PANEL_L, PANEL_H = 0.3, 0.02, 0.4
+        OFFSET = 0.25  # metres gap from target center
 
-        delta = max(float(w), float(l), float(h)) * 0.6 + 0.05
+        cx, cy, cz = float(target_box7[3]), float(target_box7[4]), float(target_box7[5])
         rel = relation.lower()
 
         if rel in ("infrontof", "front"):
-            cy -= delta
+            cy -= OFFSET
         elif rel in ("behind",):
-            cy += delta
+            cy += OFFSET
         elif rel in ("leftof", "left"):
-            cx -= delta
+            cx -= OFFSET
         elif rel in ("rightof", "right"):
-            cx += delta
+            cx += OFFSET
         elif rel in ("ontop", "standing on", "supported by"):
-            cz += h * 0.5 + 0.05
+            cz += OFFSET
         elif rel in ("under",):
-            cz -= h * 0.5 + 0.05
+            cz -= OFFSET
 
-        box[3], box[4], box[5] = cx, cy, cz
-        return box
+        return np.array([PANEL_W, PANEL_L, PANEL_H, cx, cy, cz, 0.0], dtype=np.float32)
 
     def _normalize_boxes_for_model(self, boxes7: List[np.ndarray], labels: List[str]) -> Tuple[np.ndarray, np.ndarray]:
         """Normalize metric boxes and discretize angles for model encoding.
@@ -582,6 +592,15 @@ class ContextAwareContentWrapper:
         if len(enc_objs) == 0:
             raise ValueError("No scene nodes matched known classes. Please expand class_alias_map.")
 
+        # Compute scene centroid from encoder node centers and subtract it so that
+        # all positions are relative to the scene center. This prevents the
+        # normalization statistics (trained on ~origin-centered indoor rooms) from
+        # being massively out of range for scenes placed far from the world origin.
+        enc_centers = np.stack([b[3:6] for b in enc_boxes7], axis=0)  # [N, 3]
+        scene_centroid = enc_centers.mean(axis=0).astype(np.float32)   # [3]
+        for b in enc_boxes7:
+            b[3:6] -= scene_centroid
+
         scene_root_idx_enc: Optional[int] = None
         if self.add_scene_node and "_scene_" in self.vocab["object_name_to_idx"]:
             scene_root_idx_enc = len(enc_objs)
@@ -648,8 +667,20 @@ class ContextAwareContentWrapper:
                 )
                 continue
 
-            new_class = self._canonical_class(add.object_name)
-            cls_idx = default_cls_idx if new_class is None else self.vocab["object_name_to_idx"].get(new_class, default_cls_idx)
+            # Determine class for the new node.
+            # Priority: function_name mapping > object label alias > default_cls.
+            # CreateText -> "screen" (flat display panel); CreateTextTo2D -> "picture" (wall art).
+            _FUNCTION_CLASS_MAP = {
+                "createtext": "screen",
+                "createtextto2d": "picture",
+            }
+            fn_key = add.function_name.lower()
+            fn_class = _FUNCTION_CLASS_MAP.get(fn_key)
+            if fn_class is not None and fn_class in self.vocab["object_name_to_idx"]:
+                cls_idx = self.vocab["object_name_to_idx"][fn_class]
+            else:
+                new_class = self._canonical_class(add.object_name)
+                cls_idx = default_cls_idx if new_class is None else self.vocab["object_name_to_idx"].get(new_class, default_cls_idx)
 
             target_idx = label_to_dec_idx[add.target_name]
             init_box = self._make_initial_added_box(dec_boxes7[target_idx], add.relation)
@@ -694,6 +725,7 @@ class ContextAwareContentWrapper:
             "manipulated_nodes": [],
             "dec_labels": dec_labels,
             "skipped_additions": skipped_additions,
+            "scene_centroid": scene_centroid,
         }
         return inputs
 
@@ -768,12 +800,21 @@ class ContextAwareContentWrapper:
 
         boxes_pred_den = batch_torch_denormalize_box_params(boxes_pred_norm)
 
+        # Recover the scene centroid that was subtracted during build_model_inputs
+        # so that output positions are in the original world coordinate frame.
+        scene_centroid: np.ndarray = model_inputs.get("scene_centroid", np.zeros(3, dtype=np.float32))
+
         predictions: List[Dict[str, Any]] = []
         for i in range(boxes_pred_den.shape[0]):
             if int(keep[i].item()) != 0:
                 continue
 
             b = boxes_pred_den[i].detach().cpu().numpy().tolist()
+
+            # Re-apply centroid offset to cx, cy, cz (indices 3, 4, 5).
+            b[3] += float(scene_centroid[0])
+            b[4] += float(scene_centroid[1])
+            b[5] += float(scene_centroid[2])
 
             yaw_deg = None
             if angles_pred is not None:

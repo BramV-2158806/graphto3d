@@ -79,7 +79,7 @@ def main():
             scene_nodes=scene_nodes,
             scene_edges=scene_graph.get("edges", []),
             additions=additions,
-            default_added_class="picture" # Fallback class
+            default_added_class="screen"  # Fallback class; CreateText -> screen, CreateTextTo2D -> picture
         )
 
         response = wrapper.predict_addition_boxes(model_inputs)
